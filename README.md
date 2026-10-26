@@ -52,6 +52,29 @@ Remote-MFi-Server/
 
 ## 一、从 ZIP 部署到 FNOS
 
+### 0. 也可以直接使用 Docker Hub 镜像
+
+已发布的多架构镜像为：
+
+```text
+hanfu1997/remote-mfi-server:1.0.0
+```
+
+镜像同时支持 `linux/amd64` 和 `linux/arm64`。当前 Docker Hub 仓库为私有仓库，先在
+FNOS/NAS 上登录，再拉取镜像：
+
+```bash
+docker login -u hanfu1997
+export REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server:1.0.0
+docker compose pull
+docker compose up -d --no-build
+```
+
+登录密码应使用 Docker Hub Personal Access Token，不要把 Docker Hub 主密码或 Token
+写进 `docker-compose.yml`。如果把 `REMOTE_MFI_IMAGE` 写进 `.env`，后续执行 Compose
+命令时就不需要重复 `export`。`latest` 会跟随 GitHub 的 `main` 分支，正式部署建议固定
+使用 `1.0.0` 这类版本标签，便于升级和回滚。
+
 ### 1. 准备条件
 
 - FNOS 已安装 Docker，并能使用 `docker compose`；若只使用 FNOS 图形界面的 Compose

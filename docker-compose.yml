@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: remote-mfi-server:local
+    image: ${REMOTE_MFI_IMAGE:-remote-mfi-server:local}
     container_name: remote-mfi-server
     restart: unless-stopped
     init: true
