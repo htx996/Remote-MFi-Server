@@ -26,6 +26,11 @@ def make_settings(command: Path, timeout: float = 1.0) -> Settings:
     )
 
 
+def test_settings_default_to_the_built_in_hardware_backend() -> None:
+    settings = Settings(mfi_bearer_token="test-token-0123456789abcdef0123456789abcdef")
+    assert settings.mfi_backend_command == "/usr/local/bin/mfi-backend"
+
+
 @pytest.mark.asyncio
 async def test_command_backend_sends_operation_and_json_stdin(tmp_path: Path) -> None:
     helper = write_executable(
@@ -122,7 +127,9 @@ while True:
     with pytest.raises(BackendFailure, match="stdout is too large"):
         await backend.sign(b"challenge", "request-1")
 
-    assert time.monotonic() - started < 0.75
+    # Fresh executable scripts can incur roughly 0.8 s of macOS security/cold-start
+    # latency. This still proves output limiting stops the process before its 2 s timeout.
+    assert time.monotonic() - started < 1.5
 
 
 @pytest.mark.asyncio
@@ -197,7 +204,10 @@ async def test_static_certificate_does_not_require_hardware_command() -> None:
 @pytest.mark.asyncio
 async def test_sign_without_hardware_command_is_unavailable() -> None:
     backend = CommandBackend(
-        Settings(mfi_bearer_token="test-token-0123456789abcdef0123456789abcdef"),
+        Settings(
+            mfi_bearer_token="test-token-0123456789abcdef0123456789abcdef",
+            mfi_backend_command="",
+        ),
     )
     with pytest.raises(BackendUnavailable, match="MFI_BACKEND_COMMAND"):
         await backend.sign(b"challenge", "request-1")

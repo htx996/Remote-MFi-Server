@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     mfi_certificate_type: Literal["mfi", "baa"] = "mfi"
     mfi_protocol_major: int = Field(default=3, ge=0, le=255)
 
-    mfi_backend_command: str = ""
+    mfi_backend_command: str = "/usr/local/bin/mfi-backend"
     mfi_backend_timeout_seconds: float = Field(default=8.0, gt=0, le=120)
 
     idempotency_ttl_seconds: int = Field(default=300, ge=1, le=86_400)

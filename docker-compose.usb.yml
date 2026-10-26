@@ -1,6 +1,8 @@
 services:
   remote-mfi-server:
+    # 只映射当前 CH341 节点；设备拔插导致编号变化时更新 .env 后重建容器。
     devices:
       - "${CH341_DEVICE_PATH:?请在 .env 设置实际 CH341_DEVICE_PATH}:${CH341_DEVICE_PATH:?请在 .env 设置实际 CH341_DEVICE_PATH}:rwm"
     group_add:
+      # 使用 stat 输出的数字 GID；当前 FNOS root:root 0664 节点应填 0。
       - "${CH341_DEVICE_GID:?请在 .env 设置设备节点的数字 GID}"

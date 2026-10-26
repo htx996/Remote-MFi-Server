@@ -12,6 +12,7 @@ services:
     ports:
       - "${REMOTE_MFI_PORT:-8765}:8000"
     volumes:
+      # 可选外部后端目录；仅当管理员显式覆盖 MFI_BACKEND_COMMAND 时使用。
       - ./backend:/opt/remote-mfi/backend:ro
       - ./secrets:/run/secrets/remote-mfi:ro
     read_only: true
