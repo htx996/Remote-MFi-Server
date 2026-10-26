@@ -20,8 +20,10 @@ const (
 )
 
 var (
-	errUSBPermission = errors.New("USB permission denied")
-	errUSBBusy       = errors.New("USB device busy")
+	ErrUSBPermission = errors.New("USB permission denied")
+	ErrUSBBusy       = errors.New("USB device busy")
+	ErrUSBMissing    = errors.New("USB device not found")
+	ErrI2CNACK       = errors.New("I2C NACK")
 )
 
 type bulkSession interface {
@@ -221,10 +223,10 @@ func waitForContext(ctx context.Context, delay time.Duration) error {
 
 func safeUSBError(operation string, err error) error {
 	switch {
-	case errors.Is(err, errUSBPermission):
-		return fmt.Errorf("%s: USB permission denied", operation)
-	case errors.Is(err, errUSBBusy):
-		return fmt.Errorf("%s: USB device busy", operation)
+	case errors.Is(err, ErrUSBPermission):
+		return fmt.Errorf("%s: %w", operation, ErrUSBPermission)
+	case errors.Is(err, ErrUSBBusy):
+		return fmt.Errorf("%s: %w", operation, ErrUSBBusy)
 	default:
 		return fmt.Errorf("%s: USB operation failed", operation)
 	}

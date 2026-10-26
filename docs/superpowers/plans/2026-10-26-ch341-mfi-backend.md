@@ -510,4 +510,3 @@ Configure xcertplay base URL and Bearer Token. Final success requires xcertplay/
 - [ ] **Step 10: Roll back on any failed gate**
 
 Set the image back to `hanfu1997/remote-mfi-server:1.0.0`, restore the previous `MFI_BACKEND_COMMAND`, recreate only this service, and verify `/healthz`. Keep logs and source for diagnosis; do not delete the failed image or user data.
-

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/htx996/remote-mfi-server/hardware-backend/internal/ch341"
 	"github.com/htx996/remote-mfi-server/hardware-backend/internal/config"
 	"github.com/htx996/remote-mfi-server/hardware-backend/internal/mfi"
 )
@@ -127,6 +128,27 @@ func TestRunRejectsMalformedTrailingAndOversizedJSON(t *testing.T) {
 	}
 }
 
+func TestRunRejectsInvalidInputBeforeOpeningUSB(t *testing.T) {
+	inputs := []struct{ operation, input string }{
+		{"probe", "null"}, {"probe", "[]"}, {"probe", `"text"`},
+		{"sign", fmt.Sprintf(`{"challenge":%q,"requestId":"id"}`, base64.StdEncoding.EncodeToString(make([]byte, 129)))},
+		{"sign", fmt.Sprintf(`{"challenge":"AQ==","requestId":%q}`, strings.Repeat("x", 129))},
+	}
+	for _, input := range inputs {
+		t.Run(input.operation+input.input[:min(len(input.input), 12)], func(t *testing.T) {
+			opened := false
+			open := func(context.Context, config.Config) (mfi.I2CTransport, error) {
+				opened = true
+				return nil, errors.New("should not open")
+			}
+			exit, stdout, _ := runCommand(t, []string{input.operation}, input.input, open)
+			if exit == 0 || opened || stdout != "" {
+				t.Fatalf("invalid input reached USB: exit=%d opened=%v stdout=%q", exit, opened, stdout)
+			}
+		})
+	}
+}
+
 func TestRunProbeEmitsOnlyNonSensitiveHardwareFields(t *testing.T) {
 	open, transport := openWithSteps(t, probeSteps()...)
 	exitCode, stdout, stderr := runCommand(t, []string{"probe"}, "{}", open)
@@ -224,7 +246,7 @@ func TestRunResetProbesWithoutPulsingPhysicalRST(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatalf("reset stdout is not JSON: %v", err)
 	}
-	want := "USB session reopened; physical MFi RST was not pulsed to preserve I2C address 0x11"
+	want := "USB session reopened; physical MFi RST was not pulsed; probed I2C address 0x11"
 	if len(got) != 1 || got["detail"] != want {
 		t.Fatalf("reset JSON = %#v, want detail %q", got, want)
 	}
@@ -241,6 +263,24 @@ func TestRunHardwareFailureHasSafeStderrAndNoSuccessJSON(t *testing.T) {
 	}
 	if strings.Contains(stderr, secret) || !strings.Contains(stderr, "probe") {
 		t.Fatalf("hardware failure stderr is unsafe or unhelpful: %q", stderr)
+	}
+}
+
+func TestRunReportsSafeUSBErrorCategory(t *testing.T) {
+	for _, tc := range []struct {
+		err      error
+		category string
+	}{
+		{ch341.ErrUSBPermission, "usb_permission"}, {ch341.ErrUSBBusy, "usb_busy"},
+		{ch341.ErrUSBMissing, "usb_missing"}, {context.DeadlineExceeded, "usb_timeout"},
+	} {
+		open := func(context.Context, config.Config) (mfi.I2CTransport, error) {
+			return nil, fmt.Errorf("secret-payload: %w", tc.err)
+		}
+		code, stdout, stderr := runCommand(t, []string{"probe"}, "{}", open)
+		if code == 0 || stdout != "" || !strings.Contains(stderr, tc.category) || strings.Contains(stderr, "secret-payload") {
+			t.Fatalf("unsafe or missing category: %d %q %q", code, stdout, stderr)
+		}
 	}
 }
 

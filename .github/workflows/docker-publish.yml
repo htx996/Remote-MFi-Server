@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - codex/ch341-mfi-backend
     tags:
       - "v*"
   workflow_dispatch:
@@ -22,7 +23,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install libusb build dependencies
         run: |
@@ -30,7 +31,7 @@ jobs:
           sudo apt-get install --yes --no-install-recommends libusb-1.0-0-dev pkg-config
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -43,7 +44,7 @@ jobs:
         run: python -m pytest -q
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.23.x"
           cache-dependency-path: hardware-backend/go.sum
@@ -56,30 +57,85 @@ jobs:
         working-directory: hardware-backend
         run: go vet ./...
 
+  smoke:
+    name: Preflight final image (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Determine build identity
+        id: identity
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then version="${REF_NAME#v}"; else version="sha-$COMMIT"; fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'date=%s\n' "$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build final image without publishing
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: remote-mfi-preflight:local
+          build-args: |
+            VERSION=${{ steps.identity.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.identity.outputs.date }}
+          cache-from: type=gha
+
+      - name: Verify final image startup and identity
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          test "$(docker image inspect --format '{{.Config.User}}' remote-mfi-preflight:local)" = '10001:10001'
+          result=$(docker run --rm --platform "$PLATFORM" remote-mfi-preflight:local /usr/local/bin/mfi-backend --version)
+          printf '%s\n' "$result"
+          case "$result" in *"version=$VERSION commit=$COMMIT "*) ;; *) exit 1 ;; esac
+          docker run --rm --platform "$PLATFORM" --entrypoint sh remote-mfi-preflight:local -c 'ldd /usr/local/bin/mfi-backend > /tmp/links && cat /tmp/links && ! grep -q "not found" /tmp/links && test -f /usr/share/doc/remote-mfi/hardware-backend/LICENSE && test -f /usr/share/doc/remote-mfi/hardware-backend/vendor/github.com/google/gousb/LICENSE && test -f /usr/share/doc/remote-mfi/Dockerfile'
+
   publish:
     name: Build and publish
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, smoke]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4.4.0
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4.4.1
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4.7.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           username: hanfu1997
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Generate image metadata
         id: meta
-        uses: docker/metadata-action@v6.2.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: hanfu1997/remote-mfi-server
           tags: |
@@ -89,28 +145,31 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
 
+      - name: Determine build identity
+        id: identity
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then version="${REF_NAME#v}"; else version="sha-$COMMIT"; fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'date=%s\n' "$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
         id: build
-        uses: docker/build-push-action@v7.4.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.identity.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.identity.outputs.date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
-
-      - name: Smoke test amd64 image
-        run: >-
-          docker run --rm --platform linux/amd64
-          "hanfu1997/remote-mfi-server@${{ steps.build.outputs.digest }}"
-          /usr/local/bin/mfi-backend --version
-
-      - name: Smoke test arm64 image under QEMU
-        run: >-
-          docker run --rm --platform linux/arm64
-          "hanfu1997/remote-mfi-server@${{ steps.build.outputs.digest }}"
-          /usr/local/bin/mfi-backend --version

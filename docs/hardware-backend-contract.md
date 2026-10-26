@@ -57,6 +57,8 @@ stdin：
 
 内置后端只打开配置的 USB VID/PID，并只探测明确配置的业务地址；它不会在 `0x11`
 失败时静默切换到 `0x10`。该操作不会返回证书正文。
+需要排查备选地址时，管理员可以只为一次 `probe` 子进程显式设置
+`MFI_I2C_ADDRESS=0x10`；该设置不影响 API 服务或其他业务操作。
 
 ## certificate
 
@@ -144,7 +146,7 @@ stdout：
 
 ```json
 {
-  "detail": "USB session reopened; physical MFi RST was not pulsed to preserve I2C address 0x11"
+  "detail": "USB session reopened; physical MFi RST was not pulsed; probed I2C address 0x11"
 }
 ```
 

@@ -59,7 +59,7 @@ Remote-MFi-Server/
 └── docker-compose.usb.yml       显式映射实际 CH341 设备
 ```
 
-## 一、从 ZIP 部署到 FNOS
+## 一、部署到 FNOS
 
 ### 0. 也可以直接使用 Docker Hub 镜像
 
@@ -91,18 +91,17 @@ docker compose up -d --no-build
   `/vol1/docker/remote-mfi` 举例；你的卷名可能不同。
 - 防火墙只向需要连接的局域网/VPN 网段开放端口，默认不对公网开放。
 
-下载交付的 `Remote-MFi-Server-1.1.0.zip` 和同目录下的
-`Remote-MFi-Server-1.1.0.zip.sha256`，上传到选定目录。通过 SSH 校验并解压：
+从公开 GitHub 仓库获取与目标镜像版本对应的源码：
 
 ```bash
 mkdir -p /vol1/docker/remote-mfi
 cd /vol1/docker/remote-mfi
-sha256sum -c Remote-MFi-Server-1.1.0.zip.sha256
-unzip Remote-MFi-Server-1.1.0.zip
+git clone https://github.com/htx996/Remote-MFi-Server.git
 cd Remote-MFi-Server
+git checkout v1.1.0
 ```
 
-校验结果必须包含 `OK`。解压后的关键目录应为：
+检查 Git 标签和镜像版本一致。关键目录应为：
 
 ```text
 /vol1/docker/remote-mfi/Remote-MFi-Server/
@@ -159,7 +158,7 @@ chmod 0444 secrets/certificate.bin
 未映射 USB 时先启动基础服务：
 
 ```bash
-docker compose up -d --build
+docker compose up -d --no-build
 docker compose ps
 curl -fsS http://127.0.0.1:8765/healthz
 ```
@@ -190,16 +189,10 @@ docker compose down
 
 以下步骤不要求 USB 已映射，适合先确认 FNOS 的 Docker、端口和防火墙。
 
-```bash
-cp .env.example .env
-openssl rand -hex 32
-```
-
-若未使用上一节的自动写入方式，把第二条命令生成的随机值填入 `.env` 的
-`MFI_BEARER_TOKEN`。随后启动：
+按上一节创建 `.env` 和随机令牌，再启动：
 
 ```bash
-docker compose up -d --build
+docker compose up -d --no-build
 docker compose ps
 ```
 
@@ -218,16 +211,8 @@ curl -fsS http://127.0.0.1:8765/healthz
 这里的 `ok` 只表示 HTTP 进程可用，不表示 CH341F 或 MFi 芯片已经接通。
 换句话说，`/healthz` 只验证 HTTP 服务；硬件就绪必须另外通过 `mfi-backend probe`。
 
-未映射 USB 或芯片不可访问时，携带正确 Token 调用签名会得到 5xx 和清楚的 `detail`，
-不会得到假签名：
-
-```bash
-curl -i \
-  -H 'Authorization: Bearer 你的Token' \
-  -H 'Content-Type: application/json' \
-  -d '{"challenge":"AQ==","requestId":"smoke-test"}' \
-  http://127.0.0.1:8765/mfi/sign
-```
+未映射 USB 或芯片不可访问时，真实硬件调用返回 5xx；请在下方的分层验收中检查，
+不要把令牌放到命令行参数或 shell 历史，也不要打印签名响应正文。
 
 ## 三、内置真实 MFi 硬件后端
 
@@ -316,7 +301,7 @@ CH341_DEVICE_GID=实际数字GID
 docker compose \
   -f docker-compose.yml \
   -f docker-compose.usb.yml \
-  up -d --build
+  up -d --no-build
 ```
 
 确认容器能看到节点：
@@ -386,6 +371,17 @@ services:
 
    只接受 `usbId=1a86:5512`、`i2cAddress=17`（即 `0x11`）、合理的
    `protocolMajor` 和非零 `certificateLength`。这一步不读取并打印证书正文。
+
+   若 `0x11` 探测失败，可在排查时单独只读探测 `0x10`：
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.usb.yml exec -T \
+     -e MFI_I2C_ADDRESS=0x10 remote-mfi-server \
+     sh -c 'printf "{}\n" | /usr/local/bin/mfi-backend probe'
+   ```
+
+   该临时环境变量只影响此诊断进程，不修改容器配置，不能让业务请求自动切换地址；
+   即使 `0x10` 有响应，也不要把它当作 `0x11` 的业务验收通过。
 
 3. **证书层**：先让当前 shell 安全加载 `.env`，调用 API 后仅打印证书长度与服务计算的
    摘要。不要在终端直接输出完整 JSON 响应。
@@ -533,7 +529,7 @@ SHA-256 由服务根据证书字节计算，避免配置值与证书不一致。
 
 ```json
 {
-  "detail": "USB session reopened; physical MFi RST was not pulsed to preserve I2C address 0x11"
+  "detail": "USB session reopened; physical MFi RST was not pulsed; probed I2C address 0x11"
 }
 ```
 
@@ -580,15 +576,19 @@ signature、证书正文或请求体。
 
 ### 固定版本回滚
 
-如果新版本的 HTTP、probe、证书或签名任一层失败，保留现有 `.env` 和 Token，只将镜像
-恢复为稳定版本并重建当前服务：
+升级前请在安全位置备份 `.env` 和 Compose 文件，记录当时的镜像引用及后端命令。
+如果新版本的 HTTP、probe、证书或签名任一层失败，先恢复这些备份，再显式覆盖镜像
+引用并只重建本服务。下面假设已将备份恢复到当前目录：
 
 ```bash
-sed -i 's#^REMOTE_MFI_IMAGE=.*#REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server:1.0.0#' .env
-docker compose -f docker-compose.yml -f docker-compose.usb.yml pull
-docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d --force-recreate
+REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server:1.0.0 docker compose -f docker-compose.yml -f docker-compose.usb.yml pull remote-mfi-server
+REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server:1.0.0 docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d --no-build --force-recreate remote-mfi-server
+docker inspect --format '{{.Config.Image}} {{.Image}}' remote-mfi-server
 curl -fsS http://127.0.0.1:8765/healthz
 ```
+
+检查 `docker inspect` 第一项确实为 `hanfu1997/remote-mfi-server:1.0.0`，并核对镜像
+ID；仅凭健康检查成功无法证明已经回滚。恢复的 `.env` 必须包含升级前的后端命令。
 
 不要删除旧镜像、旧 Compose、`.env`、Bearer Token 或用户数据。`1.0.0` 只提供原 API
 框架，不包含本次内置硬件辅助程序，因此回滚后 `/healthz` 可恢复，但硬件签名能力也会

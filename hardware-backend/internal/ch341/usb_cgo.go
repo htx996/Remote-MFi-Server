@@ -66,7 +66,7 @@ func Open(ctx context.Context, cfg config.Config) (mfi.I2CTransport, error) {
 	}
 	if device == nil {
 		_ = usbContext.Close()
-		return nil, fmt.Errorf("open configured CH341: no device %04x:%04x", cfg.USBVendor, cfg.USBProduct)
+		return nil, fmt.Errorf("open configured CH341 %04x:%04x: %w", cfg.USBVendor, cfg.USBProduct, ErrUSBMissing)
 	}
 	if err := ctx.Err(); err != nil {
 		_ = device.Close()
@@ -186,9 +186,9 @@ func classifyGousbError(err error) error {
 	if errors.As(err, &usbError) {
 		switch usbError {
 		case gousb.ErrorAccess:
-			return errUSBPermission
+			return ErrUSBPermission
 		case gousb.ErrorBusy:
-			return errUSBBusy
+			return ErrUSBBusy
 		}
 	}
 	return err

@@ -18,6 +18,7 @@ type fakeRead struct {
 type fakeBulkSession struct {
 	writes        [][]byte
 	reads         []fakeRead
+	readCalls     int
 	closed        bool
 	writeOverride func(context.Context, []byte) (int, error)
 }
@@ -34,6 +35,7 @@ func (s *fakeBulkSession) Write(ctx context.Context, data []byte) (int, error) {
 }
 
 func (s *fakeBulkSession) Read(ctx context.Context, buffer []byte) (int, error) {
+	s.readCalls++
 	if len(s.reads) == 0 {
 		return 0, context.DeadlineExceeded
 	}
@@ -43,6 +45,35 @@ func (s *fakeBulkSession) Read(ctx context.Context, buffer []byte) (int, error) 
 		return 0, read.err
 	}
 	return copy(buffer, read.data), nil
+}
+
+func TestTransportReadsSegmentedCertificateWindows(t *testing.T) {
+	for _, length := range []int{33, 64, 95, 128} {
+		t.Run(fmt.Sprint(length), func(t *testing.T) {
+			want := make([]byte, length)
+			for index := range want {
+				want[index] = byte(index)
+			}
+			session := &fakeBulkSession{}
+			for offset := 0; offset < length; offset += 32 {
+				end := min(offset+32, length)
+				session.reads = append(session.reads, fakeRead{data: want[offset:end]})
+			}
+			transport, err := newTransport(session, 100, func(transport *Transport) {
+				transport.wait = func(context.Context, time.Duration) error { return nil }
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := transport.Transaction(context.Background(), 0x11, nil, length)
+			if err != nil || !bytes.Equal(got, want) {
+				t.Fatalf("read %d bytes: error=%v got length=%d", length, err, len(got))
+			}
+			if session.readCalls != (length+31)/32 {
+				t.Fatalf("read calls=%d, want %d", session.readCalls, (length+31)/32)
+			}
+		})
+	}
 }
 
 func (s *fakeBulkSession) Close() error {
@@ -167,7 +198,7 @@ func TestTransportCancellationOrTimeoutClosesSession(t *testing.T) {
 
 func TestTransportClaimErrorsAreSafeAndExcludePayloadBytes(t *testing.T) {
 	secret := "deadbeef-certificate-challenge-signature"
-	for _, sentinel := range []error{errUSBPermission, errUSBBusy} {
+	for _, sentinel := range []error{ErrUSBPermission, ErrUSBBusy} {
 		raw := fmt.Errorf("%s: %w", secret, sentinel)
 		got := safeUSBError("claim CH341 interface", raw).Error()
 		if strings.Contains(got, secret) {

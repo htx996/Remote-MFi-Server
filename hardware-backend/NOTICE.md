@@ -20,5 +20,8 @@ and container-oriented libusb lifecycle handling.
 
 The Python FastAPI service is a separate program. It communicates with this
 helper only through command-line arguments, JSON stdin/stdout, process exit
-status, and a subprocess boundary. The distributed Docker image is an aggregate
-containing both programs and the helper's complete corresponding source.
+status, and a subprocess boundary. The distributed Docker image is an aggregate.
+It contains the helper source, vendored Go dependencies and licenses, and the
+Docker build recipe under /usr/share/doc/remote-mfi. The exact source revision is
+shown by `mfi-backend --version` and OCI metadata. Source repository:
+https://github.com/htx996/Remote-MFi-Server.

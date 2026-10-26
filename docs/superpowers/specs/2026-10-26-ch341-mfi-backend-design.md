@@ -286,4 +286,3 @@ stdin：
 - 实机证书读取成功且 SHA-256 稳定；
 - 实机签名返回真实非空结果；
 - 最终成功状态只能在 xcertplay 日志出现 `AA05 AuthenticationSucceeded` 后声明。
-

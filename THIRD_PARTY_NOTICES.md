@@ -17,4 +17,5 @@ on study and modification of:
 The Python FastAPI service and the GPL helper do not link at the language or
 library level. They communicate only through a subprocess interface consisting
 of argv, JSON stdin/stdout, and an exit status. The Docker image aggregates both
-programs and includes the helper's corresponding source and notices.
+programs and includes the helper source, vendored Go dependencies and licenses,
+build recipe and notices. The image's helper version identifies its source commit.

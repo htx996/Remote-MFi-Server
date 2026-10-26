@@ -15,7 +15,8 @@ RUN go mod download
 
 COPY hardware-backend/ ./
 
-RUN CGO_ENABLED=1 go build \
+RUN go mod vendor \
+    && CGO_ENABLED=1 go build \
       -trimpath \
       -ldflags "-s -w \
         -X github.com/htx996/remote-mfi-server/hardware-backend/internal/command.Version=${VERSION} \
@@ -45,6 +46,7 @@ RUN python -m pip install --no-cache-dir --requirement requirements.txt
 COPY --chown=10001:10001 app ./app
 COPY --from=hardware-builder /out/mfi-backend /usr/local/bin/mfi-backend
 COPY --from=hardware-builder /src/hardware-backend /usr/share/doc/remote-mfi/hardware-backend
+COPY Dockerfile /usr/share/doc/remote-mfi/Dockerfile
 COPY THIRD_PARTY_NOTICES.md /usr/share/doc/remote-mfi/THIRD_PARTY_NOTICES.md
 
 USER 10001:10001

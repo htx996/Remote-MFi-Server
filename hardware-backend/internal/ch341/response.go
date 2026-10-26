@@ -53,7 +53,7 @@ func ExtractReadData(received []byte, dataBytes int) ([]byte, error) {
 	dataStart := len(received) - dataBytes
 	for offset, status := range received[:dataStart] {
 		if status&ackBit != 0 {
-			return nil, fmt.Errorf("CH341 reported I2C NACK on byte %d", offset)
+			return nil, fmt.Errorf("%w on status byte %d", ErrI2CNACK, offset)
 		}
 	}
 	return append([]byte(nil), received[dataStart:]...), nil

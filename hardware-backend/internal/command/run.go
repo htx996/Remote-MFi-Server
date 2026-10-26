@@ -9,19 +9,18 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/htx996/remote-mfi-server/hardware-backend/internal/ch341"
 	"github.com/htx996/remote-mfi-server/hardware-backend/internal/config"
 	"github.com/htx996/remote-mfi-server/hardware-backend/internal/mfi"
 )
 
-const (
-	maximumInputBytes = 4 * 1024
-	resetDetail       = "USB session reopened; physical MFi RST was not pulsed to preserve I2C address 0x11"
-)
+const maximumInputBytes = 4 * 1024
 
 var (
 	Version   = "dev"
@@ -96,12 +95,12 @@ func Run(
 
 	var challenge []byte
 	if sign, ok := request.(*signRequest); ok {
-		if strings.TrimSpace(sign.RequestID) == "" || sign.Challenge == "" {
+		if strings.TrimSpace(sign.RequestID) == "" || len([]rune(sign.RequestID)) > 128 || sign.Challenge == "" {
 			return fail(stderr, operation, "challenge and requestId are required")
 		}
 		decoded, err := base64.StdEncoding.Strict().DecodeString(sign.Challenge)
-		if err != nil || len(decoded) == 0 {
-			return fail(stderr, operation, "challenge must be valid non-empty Base64")
+		if err != nil || len(decoded) < 1 || len(decoded) > 128 {
+			return fail(stderr, operation, "challenge must be valid Base64 decoding to 1..128 bytes")
 		}
 		challenge = decoded
 	}
@@ -115,7 +114,7 @@ func Run(
 	}
 	transport, err := open(ctx, cfg)
 	if err != nil {
-		return fail(stderr, operation, "hardware transport could not be opened")
+		return fail(stderr, operation, safeCategory(err))
 	}
 	driver, err := mfi.NewDriver(transport, cfg.I2CAddress)
 	if err != nil {
@@ -126,7 +125,7 @@ func Run(
 	response, operationErr := executeOperation(ctx, operation, cfg, driver, challenge)
 	closeErr := driver.Close()
 	if operationErr != nil {
-		return fail(stderr, operation, "hardware operation failed")
+		return fail(stderr, operation, safeCategory(operationErr))
 	}
 	if closeErr != nil {
 		return fail(stderr, operation, "hardware transport could not be closed")
@@ -181,7 +180,7 @@ func executeOperation(
 		if _, err := driver.Probe(ctx); err != nil {
 			return nil, err
 		}
-		return resetResponse{Detail: resetDetail}, nil
+		return resetResponse{Detail: fmt.Sprintf("USB session reopened; physical MFi RST was not pulsed; probed I2C address 0x%02x", cfg.I2CAddress)}, nil
 	default:
 		return nil, fmt.Errorf("unsupported operation")
 	}
@@ -195,6 +194,10 @@ func decodeOneObject(reader io.Reader, destination any) error {
 	}
 	if len(data) > maximumInputBytes {
 		return fmt.Errorf("input exceeds %d bytes", maximumInputBytes)
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return fmt.Errorf("input must be a JSON object")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -214,4 +217,23 @@ func decodeOneObject(reader io.Reader, destination any) error {
 func fail(stderr io.Writer, operation, reason string) int {
 	_, _ = fmt.Fprintf(stderr, "mfi-backend: %s failed: %s\n", operation, reason)
 	return 1
+}
+
+func safeCategory(err error) string {
+	switch {
+	case errors.Is(err, ch341.ErrUSBPermission):
+		return "usb_permission"
+	case errors.Is(err, ch341.ErrUSBBusy):
+		return "usb_busy"
+	case errors.Is(err, ch341.ErrUSBMissing):
+		return "usb_missing"
+	case errors.Is(err, ch341.ErrI2CNACK):
+		return "i2c_nack"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "usb_timeout"
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	default:
+		return "hardware_operation_failed"
+	}
 }

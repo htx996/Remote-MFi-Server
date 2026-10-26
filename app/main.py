@@ -57,7 +57,7 @@ def create_app(settings: Settings | None = None, backend: MfiBackend | None = No
 
     application = FastAPI(
         title="Remote MFi Server",
-        version="1.0.0",
+        version="1.1.0",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

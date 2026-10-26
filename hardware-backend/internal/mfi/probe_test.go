@@ -147,6 +147,24 @@ func TestProbeRejectsInvalidDeviceVersions(t *testing.T) {
 	}
 }
 
+func TestProbeRejectsInvalidProtocolMajor(t *testing.T) {
+	for _, value := range []byte{0x00, 0xff} {
+		t.Run(fmt.Sprintf("0x%02x", value), func(t *testing.T) {
+			transport := newScriptedTransport(t,
+				selectRegister(0x11, 0x00), readBytes(0x11, 0x03),
+				selectRegister(0x11, 0x02), readBytes(0x11, value),
+			)
+			driver, err := NewDriver(transport, 0x11)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := driver.Probe(context.Background()); err == nil {
+				t.Fatal("invalid protocol major accepted")
+			}
+		})
+	}
+}
+
 func TestProbeRejectsCertificateLengthOutsideMFiLimit(t *testing.T) {
 	for _, length := range []uint16{0, 1281} {
 		t.Run(fmt.Sprintf("%d", length), func(t *testing.T) {

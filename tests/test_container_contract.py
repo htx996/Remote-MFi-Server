@@ -97,7 +97,8 @@ def test_publish_workflow_requires_python_and_go_quality_gates() -> None:
     jobs = workflow["jobs"]
     test_steps = "\n".join(str(step) for step in jobs["test"]["steps"])
 
-    assert jobs["publish"]["needs"] == "test"
+    assert "smoke" in jobs["publish"]["needs"]
+    assert jobs["smoke"]["needs"] == "test"
     assert "libusb-1.0-0-dev" in test_steps
     assert "pkg-config" in test_steps
     assert "python -m pytest -q" in test_steps
@@ -107,8 +108,10 @@ def test_publish_workflow_requires_python_and_go_quality_gates() -> None:
 
 def test_publish_workflow_smoke_runs_each_target_architecture() -> None:
     workflow = yaml.safe_load(read_text(".github/workflows/docker-publish.yml"))
-    publish_steps = "\n".join(str(step) for step in workflow["jobs"]["publish"]["steps"])
-
-    assert "--platform linux/amd64" in publish_steps
-    assert "--platform linux/arm64" in publish_steps
-    assert "/usr/local/bin/mfi-backend --version" in publish_steps
+    smoke = workflow["jobs"]["smoke"]
+    steps = "\n".join(str(step) for step in smoke["steps"])
+    assert smoke["strategy"]["matrix"]["platform"] == ["linux/amd64", "linux/arm64"]
+    assert any(step.get("with", {}).get("load") is True for step in smoke["steps"])
+    assert "/usr/local/bin/mfi-backend --version" in steps
+    assert "COMMIT=" in steps and "VERSION=" in steps
+    assert not any(step.get("with", {}).get("push") is True for step in smoke["steps"])

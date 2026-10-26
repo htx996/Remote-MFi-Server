@@ -29,6 +29,9 @@ func (d *Driver) Probe(ctx context.Context) (ProbeResult, error) {
 	if err != nil {
 		return ProbeResult{}, err
 	}
+	if protocolMajor == 0x00 || protocolMajor == 0xff {
+		return ProbeResult{}, fmt.Errorf("invalid MFi protocol major 0x%02x", protocolMajor)
+	}
 	certificateLength, err := d.readUint16(ctx, certificateLengthRegister)
 	if err != nil {
 		return ProbeResult{}, err
