@@ -70,7 +70,7 @@ hanfu1997/remote-mfi-server:1.0.0
 ```
 
 Docker Hub 仓库是公开仓库，无需登录即可拉取。新硬件后端发布后使用 `1.1.0`；在它通过
-你的实机验收前，保留 `1.0.0` 作为不可变回滚版本：
+你的实机验收前，保留 `1.0.0` 作为回滚版本，并记录实际镜像摘要：
 
 ```bash
 export REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server:1.1.0
@@ -79,14 +79,16 @@ docker compose up -d --no-build
 ```
 
 如果把 `REMOTE_MFI_IMAGE` 写进 `.env`，后续执行 Compose 命令时就不需要重复
-`export`。`latest` 会跟随 GitHub 的 `main` 分支，正式部署应固定 `1.1.0` 这类不可变
-版本标签，便于审计和回滚；不要在部署配置中保存 Docker Hub 密码或令牌。
+`export`。`latest` 会跟随 GitHub 的 `main` 分支，正式部署应固定版本并记录镜像摘要；
+Docker 标签本身可能被重指向，只有摘要能准确指定内容。不要在部署配置中保存 Docker Hub
+密码或令牌。
 
 ### 1. 准备条件
 
 - FNOS 已安装 Docker，并能使用 `docker compose`；若只使用 FNOS 图形界面的 Compose
   项目，也可以把同一目录作为项目目录导入。
-- 已启用 SSH，或能通过 FNOS 文件管理器上传并解压 ZIP。
+- 已启用 SSH，并具备 `git` 和 `python3`；也可在管理电脑下载对应 GitHub tag 的源码
+  ZIP，再通过 FNOS 文件管理器上传解压。
 - 选择 FNOS 数据盘上的持久目录，不要放在系统临时目录。下面用
   `/vol1/docker/remote-mfi` 举例；你的卷名可能不同。
 - 防火墙只向需要连接的局域网/VPN 网段开放端口，默认不对公网开放。
@@ -106,6 +108,8 @@ git checkout v1.1.0
 ```text
 /vol1/docker/remote-mfi/Remote-MFi-Server/
 ├── app/
+├── hardware-backend/LICENSE
+├── THIRD_PARTY_NOTICES.md
 ├── backend/README.md
 ├── secrets/README.md
 ├── docs/
@@ -172,7 +176,7 @@ curl -fsS http://127.0.0.1:8765/healthz
 
 需要备份的本地状态只有 `.env`、`backend/` 和 `secrets/`。不要只保留容器本身。
 
-升级时把新 ZIP 解压到新的版本目录，复制上述三个本地状态目录，先在不同端口启动并
+升级时在新版本目录检出对应 Git 标签，复制上述三个本地状态目录，先在不同端口启动并
 验证；确认后停止旧目录中的 Compose，再让新目录使用正式端口。保留旧目录即可快速
 回滚：停止新版本，重新在旧目录执行 `docker compose up -d`。
 
@@ -581,14 +585,15 @@ signature、证书正文或请求体。
 引用并只重建本服务。下面假设已将备份恢复到当前目录：
 
 ```bash
-REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server:1.0.0 docker compose -f docker-compose.yml -f docker-compose.usb.yml pull remote-mfi-server
-REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server:1.0.0 docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d --no-build --force-recreate remote-mfi-server
+REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server@sha256:d6947ae10b586c1dcda944812f28a2482f254d25bc4500300cc2277da9cdda84 docker compose -f docker-compose.yml -f docker-compose.usb.yml pull remote-mfi-server
+REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server@sha256:d6947ae10b586c1dcda944812f28a2482f254d25bc4500300cc2277da9cdda84 docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d --no-build --force-recreate remote-mfi-server
 docker inspect --format '{{.Config.Image}} {{.Image}}' remote-mfi-server
 curl -fsS http://127.0.0.1:8765/healthz
 ```
 
-检查 `docker inspect` 第一项确实为 `hanfu1997/remote-mfi-server:1.0.0`，并核对镜像
-ID；仅凭健康检查成功无法证明已经回滚。恢复的 `.env` 必须包含升级前的后端命令。
+检查 `docker inspect` 第一项确实为上面的摘要引用，并核对镜像 ID；仅凭健康检查成功
+无法证明已经回滚。恢复的 `.env` 必须包含升级前的后端命令。以上摘要为本项目
+`1.0.0` 版本已记录的多架构 manifest；应以升级前保存并验证过的摘要为准。
 
 不要删除旧镜像、旧 Compose、`.env`、Bearer Token 或用户数据。`1.0.0` 只提供原 API
 框架，不包含本次内置硬件辅助程序，因此回滚后 `/healthz` 可恢复，但硬件签名能力也会

@@ -19,3 +19,7 @@ library level. They communicate only through a subprocess interface consisting
 of argv, JSON stdin/stdout, and an exit status. The Docker image aggregates both
 programs and includes the helper source, vendored Go dependencies and licenses,
 build recipe and notices. The image's helper version identifies its source commit.
+
+The helper includes the Go runtime and standard library. Their BSD-style license,
+copyright notice and disclaimer are included at
+`/usr/share/doc/remote-mfi/licenses/go-LICENSE` in the image.

@@ -115,3 +115,20 @@ def test_publish_workflow_smoke_runs_each_target_architecture() -> None:
     assert "/usr/local/bin/mfi-backend --version" in steps
     assert "COMMIT=" in steps and "VERSION=" in steps
     assert not any(step.get("with", {}).get("push") is True for step in smoke["steps"])
+
+
+def test_release_promotes_only_the_smoke_tested_candidate_digest() -> None:
+    workflow = yaml.safe_load(read_text(".github/workflows/docker-publish.yml"))
+    steps = workflow["jobs"]["publish"]["steps"]
+    candidate = next(i for i, step in enumerate(steps) if step.get("id") == "candidate")
+    smoke = next(i for i, step in enumerate(steps) if step.get("name") == "Verify candidate digest on both architectures")
+    promote = next(i for i, step in enumerate(steps) if step.get("name") == "Promote verified candidate")
+    assert candidate < smoke < promote
+    assert "steps.candidate.outputs.digest" in str(steps[smoke])
+    assert "steps.candidate.outputs.digest" in str(steps[promote])
+    assert "imagetools create" in str(steps[promote])
+
+
+def test_runtime_contains_go_license() -> None:
+    assert "/usr/local/go/LICENSE" in read_text("Dockerfile")
+    assert "go-LICENSE" in read_text("THIRD_PARTY_NOTICES.md")

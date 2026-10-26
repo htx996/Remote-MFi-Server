@@ -109,7 +109,7 @@ jobs:
           result=$(docker run --rm --platform "$PLATFORM" remote-mfi-preflight:local /usr/local/bin/mfi-backend --version)
           printf '%s\n' "$result"
           case "$result" in *"version=$VERSION commit=$COMMIT "*) ;; *) exit 1 ;; esac
-          docker run --rm --platform "$PLATFORM" --entrypoint sh remote-mfi-preflight:local -c 'ldd /usr/local/bin/mfi-backend > /tmp/links && cat /tmp/links && ! grep -q "not found" /tmp/links && test -f /usr/share/doc/remote-mfi/hardware-backend/LICENSE && test -f /usr/share/doc/remote-mfi/hardware-backend/vendor/github.com/google/gousb/LICENSE && test -f /usr/share/doc/remote-mfi/Dockerfile'
+          docker run --rm --platform "$PLATFORM" --entrypoint sh remote-mfi-preflight:local -c 'ldd /usr/local/bin/mfi-backend > /tmp/links && cat /tmp/links && ! grep -q "not found" /tmp/links && test -f /usr/share/doc/remote-mfi/hardware-backend/LICENSE && test -f /usr/share/doc/remote-mfi/hardware-backend/vendor/github.com/google/gousb/LICENSE && test -f /usr/share/doc/remote-mfi/licenses/go-LICENSE && test -f /usr/share/doc/remote-mfi/Dockerfile'
 
   publish:
     name: Build and publish
@@ -156,14 +156,14 @@ jobs:
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
           printf 'date=%s\n' "$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push image
-        id: build
+      - name: Build and push uniquely named candidate
+        id: candidate
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: hanfu1997/remote-mfi-server:candidate-${{ github.run_id }}-${{ github.run_attempt }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ steps.identity.outputs.version }}
@@ -173,3 +173,29 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
+
+      - name: Verify candidate digest on both architectures
+        env:
+          DIGEST: ${{ steps.candidate.outputs.digest }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          image="hanfu1997/remote-mfi-server@$DIGEST"
+          for platform in linux/amd64 linux/arm64; do
+            result=$(docker run --rm --platform "$platform" "$image" /usr/local/bin/mfi-backend --version)
+            printf '%s: %s\n' "$platform" "$result"
+            case "$result" in *"version=$VERSION commit=$COMMIT "*) ;; *) exit 1 ;; esac
+            docker run --rm --platform "$platform" --entrypoint sh "$image" -c 'ldd /usr/local/bin/mfi-backend > /tmp/links && ! grep -q "not found" /tmp/links && test "$(id -u)" = 10001 && test -f /usr/share/doc/remote-mfi/licenses/go-LICENSE && test -f /usr/share/doc/remote-mfi/hardware-backend/vendor/github.com/google/gousb/LICENSE'
+          done
+
+      - name: Promote verified candidate
+        env:
+          DIGEST: ${{ steps.candidate.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          args=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then args+=(--tag "$tag"); fi
+          done <<< "$TAGS"
+          test "${#args[@]}" -gt 0
+          docker buildx imagetools create "${args[@]}" "hanfu1997/remote-mfi-server@$DIGEST"

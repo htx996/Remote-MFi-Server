@@ -178,6 +178,9 @@ func transferError(ctx context.Context, err error) error {
 	if errors.As(err, &status) && (status == gousb.TransferTimedOut || status == gousb.TransferCancelled) {
 		return context.DeadlineExceeded
 	}
+	if errors.As(err, &status) && status == gousb.TransferNoDevice {
+		return ErrUSBMissing
+	}
 	return safeUSBError("CH341 USB transfer", classifyGousbError(err))
 }
 
@@ -189,6 +192,8 @@ func classifyGousbError(err error) error {
 			return ErrUSBPermission
 		case gousb.ErrorBusy:
 			return ErrUSBBusy
+		case gousb.ErrorNoDevice, gousb.ErrorNotFound:
+			return ErrUSBMissing
 		}
 	}
 	return err

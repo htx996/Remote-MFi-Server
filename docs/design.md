@@ -62,5 +62,6 @@ FastAPI 与它不进行语言级链接，仅使用 argv、JSON stdin/stdout、�
 发布任务必须依赖独立测试任务。门禁在 Linux 上安装 libusb 开发包，运行全部 Python
 测试、Go race detector 和 Go vet；随后才允许 Buildx 构建并推送 `linux/amd64` 与
 `linux/arm64` 镜像。发布前分别通过 QEMU/本机运行每个目标架构的最终镜像
-`mfi-backend --version`。这只证明各架构镜像可启动，不能替代 FNOS 上的真实 USB、
+`mfi-backend --version`。发布时先以唯一候选标签推送镜像，再针对该候选摘要重复验证
+两个架构，通过后只把同一摘要提升为正式版本标签。这只证明各架构镜像可启动，不能替代 FNOS 上的真实 USB、
 证书、签名或 `AA05 AuthenticationSucceeded` 验收。

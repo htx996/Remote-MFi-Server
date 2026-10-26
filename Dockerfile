@@ -46,6 +46,7 @@ RUN python -m pip install --no-cache-dir --requirement requirements.txt
 COPY --chown=10001:10001 app ./app
 COPY --from=hardware-builder /out/mfi-backend /usr/local/bin/mfi-backend
 COPY --from=hardware-builder /src/hardware-backend /usr/share/doc/remote-mfi/hardware-backend
+COPY --from=hardware-builder /usr/local/go/LICENSE /usr/share/doc/remote-mfi/licenses/go-LICENSE
 COPY Dockerfile /usr/share/doc/remote-mfi/Dockerfile
 COPY THIRD_PARTY_NOTICES.md /usr/share/doc/remote-mfi/THIRD_PARTY_NOTICES.md
 

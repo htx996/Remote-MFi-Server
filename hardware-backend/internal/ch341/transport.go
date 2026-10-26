@@ -227,6 +227,8 @@ func safeUSBError(operation string, err error) error {
 		return fmt.Errorf("%s: %w", operation, ErrUSBPermission)
 	case errors.Is(err, ErrUSBBusy):
 		return fmt.Errorf("%s: %w", operation, ErrUSBBusy)
+	case errors.Is(err, ErrUSBMissing):
+		return fmt.Errorf("%s: %w", operation, ErrUSBMissing)
 	default:
 		return fmt.Errorf("%s: USB operation failed", operation)
 	}
