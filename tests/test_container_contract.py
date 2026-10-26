@@ -68,3 +68,47 @@ def test_custom_external_backend_remains_available_by_explicit_override() -> Non
     compose = yaml.safe_load(read_text("docker-compose.yml"))["services"]["remote-mfi-server"]
     assert "./backend:/opt/remote-mfi/backend:ro" in compose["volumes"]
     assert "/opt/remote-mfi/backend/mfi-backend" in read_text(".env.example")
+
+
+def test_readme_documents_the_supported_board_and_hardware_acceptance_boundary() -> None:
+    readme = read_text("README.md")
+
+    assert "CH341F（USB VID:PID `1a86:5512`）+ MFI337S3959（丝印 3959）" in readme
+    assert "mfi-backend probe" in readme
+    assert "`/healthz` 只验证 HTTP 服务" in readme
+    assert "不会脉冲物理 RST" in readme
+    assert "USB 设备编号变化" in readme
+    assert "hanfu1997/remote-mfi-server:1.0.0" in readme
+    assert "hardware-backend/NOTICE" in readme
+    assert "GNU GPL v3" in readme
+
+
+def test_readme_hardware_examples_do_not_print_certificate_or_signature_bodies() -> None:
+    readme = read_text("README.md")
+
+    assert "certificateLength" in readme
+    assert "certificateSha256" in readme
+    assert "signatureLength" in readme
+    assert "signatureSha256" in readme
+
+
+def test_publish_workflow_requires_python_and_go_quality_gates() -> None:
+    workflow = yaml.safe_load(read_text(".github/workflows/docker-publish.yml"))
+    jobs = workflow["jobs"]
+    test_steps = "\n".join(str(step) for step in jobs["test"]["steps"])
+
+    assert jobs["publish"]["needs"] == "test"
+    assert "libusb-1.0-0-dev" in test_steps
+    assert "pkg-config" in test_steps
+    assert "python -m pytest -q" in test_steps
+    assert "go test -race ./..." in test_steps
+    assert "go vet ./..." in test_steps
+
+
+def test_publish_workflow_smoke_runs_each_target_architecture() -> None:
+    workflow = yaml.safe_load(read_text(".github/workflows/docker-publish.yml"))
+    publish_steps = "\n".join(str(step) for step in workflow["jobs"]["publish"]["steps"])
+
+    assert "--platform linux/amd64" in publish_steps
+    assert "--platform linux/arm64" in publish_steps
+    assert "/usr/local/bin/mfi-backend --version" in publish_steps

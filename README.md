@@ -1,11 +1,12 @@
 # Remote-MFi-Server
 
-面向 FNOS/NAS 的 xcertplay Remote MFi HTTP 服务框架。项目提供可直接构建运行的
-FastAPI、Bearer Token、requestId 幂等缓存、健康检查、JSON 日志和 Docker Compose；
-真实 CH341F/I2C/MFi 芯片读写由你自己的硬件后端程序接入。
+面向 FNOS/NAS 的 xcertplay Remote MFi 服务。项目同时提供可直接运行的 FastAPI API
+与镜像内置的真实硬件辅助程序，支持本项目已经核对的
+**CH341F（USB VID:PID `1a86:5512`）+ MFI337S3959（丝印 3959）** USB-A 3.3 V 板。
+服务保留 Bearer Token、requestId 幂等缓存、健康检查、JSON 日志和 Docker Compose。
 
-> 重要：本项目没有、也不会伪造 MFi 签名逻辑。没有真实硬件后端时，服务可以正常
-> 启动并通过健康检查，但 `/mfi/sign` 和 `/mfi/reset` 会明确返回 503。
+> 重要：项目只把 challenge 交给真实 MFi 芯片，不包含软件私钥、固定签名或回显
+> challenge 的假实现。`/healthz` 只验证 HTTP 服务，不表示 USB、I²C 或 MFi 芯片可用。
 
 ## 兼容基线
 
@@ -29,16 +30,24 @@ FastAPI、Bearer Token、requestId 幂等缓存、健康检查、JSON 日志和 
 | requestId 幂等、冲突检测、并发串行 | 已实现，单进程内存 TTL/LRU 缓存 |
 | healthcheck 与 JSON 日志 | 已实现 |
 | Docker/FNOS 设备映射 | 已提供 Compose override 和操作说明 |
-| CH341F USB/I2C 事务 | **未伪造**，需要按你的板卡协议实现后端程序 |
-| MFi 芯片证书读取、真实签名、RST | **未伪造**，由后端程序完成 |
+| CH341F USB/I2C 事务 | 已由镜像内置的 GPL 硬件辅助程序实现 |
+| MFI337S3959 证书读取、真实签名 | 已实现，必须连接匹配的真实板卡验证 |
+| reset | 重新打开 USB 会话并探测芯片；不会脉冲物理 RST |
+| 其他 CH341 板/MFi 芯片型号 | 未承诺兼容，需按实际硬件协议另行适配 |
 | 实机 CarPlay/MFi 成功 | 必须在真实芯片、iPhone、车机上验证 |
+
+硬件辅助程序的完整源码、许可证与来源记录位于
+[`hardware-backend/`](hardware-backend/)、[`hardware-backend/NOTICE.md`](hardware-backend/NOTICE.md)
+和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。该独立程序按 **GNU GPL v3**
+发布，镜像内也包含其完整对应源码。
 
 ## 项目结构
 
 ```text
 Remote-MFi-Server/
 ├── app/                         FastAPI、鉴权、幂等和后端适配器
-├── backend/                     放置你自己的 mfi-backend 可执行程序
+├── hardware-backend/            内置 Go/libusb 硬件辅助程序源码（GPL-3.0-only）
+├── backend/                     可选：放置你自己的替代后端程序
 ├── secrets/                     可选的只读证书目录
 ├── docs/
 │   ├── design.md
@@ -54,26 +63,24 @@ Remote-MFi-Server/
 
 ### 0. 也可以直接使用 Docker Hub 镜像
 
-已发布的多架构镜像为：
+稳定回滚镜像为：
 
 ```text
 hanfu1997/remote-mfi-server:1.0.0
 ```
 
-镜像同时支持 `linux/amd64` 和 `linux/arm64`。当前 Docker Hub 仓库为私有仓库，先在
-FNOS/NAS 上登录，再拉取镜像：
+Docker Hub 仓库是公开仓库，无需登录即可拉取。新硬件后端发布后使用 `1.1.0`；在它通过
+你的实机验收前，保留 `1.0.0` 作为不可变回滚版本：
 
 ```bash
-docker login -u hanfu1997
-export REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server:1.0.0
+export REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server:1.1.0
 docker compose pull
 docker compose up -d --no-build
 ```
 
-登录密码应使用 Docker Hub Personal Access Token，不要把 Docker Hub 主密码或 Token
-写进 `docker-compose.yml`。如果把 `REMOTE_MFI_IMAGE` 写进 `.env`，后续执行 Compose
-命令时就不需要重复 `export`。`latest` 会跟随 GitHub 的 `main` 分支，正式部署建议固定
-使用 `1.0.0` 这类版本标签，便于升级和回滚。
+如果把 `REMOTE_MFI_IMAGE` 写进 `.env`，后续执行 Compose 命令时就不需要重复
+`export`。`latest` 会跟随 GitHub 的 `main` 分支，正式部署应固定 `1.1.0` 这类不可变
+版本标签，便于审计和回滚；不要在部署配置中保存 Docker Hub 密码或令牌。
 
 ### 1. 准备条件
 
@@ -84,14 +91,14 @@ docker compose up -d --no-build
   `/vol1/docker/remote-mfi` 举例；你的卷名可能不同。
 - 防火墙只向需要连接的局域网/VPN 网段开放端口，默认不对公网开放。
 
-下载交付的 `Remote-MFi-Server-1.0.0.zip` 和同目录下的
-`Remote-MFi-Server-1.0.0.zip.sha256`，上传到选定目录。通过 SSH 校验并解压：
+下载交付的 `Remote-MFi-Server-1.1.0.zip` 和同目录下的
+`Remote-MFi-Server-1.1.0.zip.sha256`，上传到选定目录。通过 SSH 校验并解压：
 
 ```bash
 mkdir -p /vol1/docker/remote-mfi
 cd /vol1/docker/remote-mfi
-sha256sum -c Remote-MFi-Server-1.0.0.zip.sha256
-unzip Remote-MFi-Server-1.0.0.zip
+sha256sum -c Remote-MFi-Server-1.1.0.zip.sha256
+unzip Remote-MFi-Server-1.1.0.zip
 cd Remote-MFi-Server
 ```
 
@@ -135,7 +142,8 @@ PY
 服务会拒绝少于 32 字节的 Token，也会拒绝旧模板中的公开占位值。然后按实际环境修改
 `.env` 的端口、后端命令、证书和 USB 节点。
 
-如果放置真实后端或证书，确保容器 UID 10001 至少可读取，后端还必须可执行：
+镜像默认使用内置 `/usr/local/bin/mfi-backend`，不需要在 `backend/` 手工创建文件。只有
+显式改用自备后端或静态证书时，才需要确保容器 UID 10001 至少可读取，后端还必须可执行：
 
 ```bash
 chmod 0755 backend
@@ -180,7 +188,7 @@ docker compose down
 
 ## 二、先启动 API 框架
 
-以下步骤不要求硬件后端，适合先确认 FNOS 的 Docker、端口和防火墙。
+以下步骤不要求 USB 已映射，适合先确认 FNOS 的 Docker、端口和防火墙。
 
 ```bash
 cp .env.example .env
@@ -208,9 +216,10 @@ curl -fsS http://127.0.0.1:8765/healthz
 ```
 
 这里的 `ok` 只表示 HTTP 进程可用，不表示 CH341F 或 MFi 芯片已经接通。
+换句话说，`/healthz` 只验证 HTTP 服务；硬件就绪必须另外通过 `mfi-backend probe`。
 
-未接入硬件后端时，携带正确 Token 调用签名会得到 503 和清楚的 `detail`，不会得到
-假签名：
+未映射 USB 或芯片不可访问时，携带正确 Token 调用签名会得到 5xx 和清楚的 `detail`，
+不会得到假签名：
 
 ```bash
 curl -i \
@@ -220,37 +229,38 @@ curl -i \
   http://127.0.0.1:8765/mfi/sign
 ```
 
-## 三、接入真实 MFi 硬件后端
+## 三、内置真实 MFi 硬件后端
 
-你需要提供一个可执行程序，例如：
+官方镜像已经包含：
 
 ```text
-backend/mfi-backend
+/usr/local/bin/mfi-backend
 ```
 
-赋予权限：
-
-```bash
-chmod 0555 backend/mfi-backend
-```
-
-默认 `.env` 已将它配置为：
+默认 `.env` 已配置：
 
 ```dotenv
-MFI_BACKEND_COMMAND=/opt/remote-mfi/backend/mfi-backend
+MFI_BACKEND_COMMAND=/usr/local/bin/mfi-backend
+CH341_USB_VID=0x1a86
+CH341_USB_PID=0x5512
+MFI_I2C_ADDRESS=0x11
+CH341_I2C_SPEED_KHZ=100
 ```
 
 服务会调用：
 
 ```text
+mfi-backend probe       # 仅供管理员只读诊断
 mfi-backend certificate
 mfi-backend sign
 mfi-backend reset
 ```
 
 请求走 JSON stdin，响应走 JSON stdout。精确字段、超时和错误约定见
-[`docs/hardware-backend-contract.md`](docs/hardware-backend-contract.md)。后端必须按你的
-CH341F 板卡、I2C 地址、MFi 芯片型号和复位接线实现真实硬件事务。
+[`docs/hardware-backend-contract.md`](docs/hardware-backend-contract.md)。内置实现只承诺支持
+上述已核对板卡：USB `1a86:5512`、I²C 100 kHz、业务地址 `0x11`。如需替换成管理员
+自备后端，可把 `MFI_BACKEND_COMMAND` 显式改为
+`/opt/remote-mfi/backend/mfi-backend`；项目仍不会提供或接受伪造签名逻辑。
 
 如果你已有从真实芯片读取出的、与该芯片签名对应的证书字节，也可以放到：
 
@@ -279,24 +289,24 @@ MFI_PROTOCOL_MAJOR=3
 lsusb
 ```
 
-`xcertplay` 当前源码刻意不内置 CH341 VID/PID，因此不要仅凭网上常见值判断。以你的
-真实 `lsusb` 输出为准。假设它显示在 Bus `001`、Device `004`，则设备节点通常是：
+本项目支持的板应显示 `1a86:5512 QinHeng Electronics CH341 in EPP/MEM/I2C mode`。仍应以
+你的真实 `lsusb` 输出为准。假设它显示在 Bus `003`、Device `004`，则设备节点通常是：
 
 ```text
-/dev/bus/usb/001/004
+/dev/bus/usb/003/004
 ```
 
 核对节点和数字组 ID：
 
 ```bash
-ls -l /dev/bus/usb/001/004
-stat -c '%g' /dev/bus/usb/001/004
+ls -l /dev/bus/usb/003/004
+stat -c '%g' /dev/bus/usb/003/004
 ```
 
 把实际结果写入 `.env`：
 
 ```dotenv
-CH341_DEVICE_PATH=/dev/bus/usb/001/004
+CH341_DEVICE_PATH=/dev/bus/usb/003/004
 CH341_DEVICE_GID=实际数字GID
 ```
 
@@ -316,15 +326,20 @@ docker compose exec remote-mfi-server \
   sh -c 'ls -l "$CH341_DEVICE_PATH"'
 ```
 
-如果这里能看到节点，只能证明 Docker 映射成功；它不证明 I2C、MFi 地址、证书读取或
-签名成功。下一步必须看你的 `mfi-backend` 自检和服务日志。
+如果这里能看到节点，只能证明 Docker 映射成功；它不证明 I²C、MFi 地址、证书读取或
+签名成功。下一步必须执行下面的分层验收。
 
-### 3. USB 路径变化
+### 3. USB 设备编号变化恢复
 
 `/dev/bus/usb/BBB/DDD` 中的设备编号可能在重新插拔或重启后改变。长期部署建议在 FNOS
 主机上根据实际 VID/PID/序列号创建 udev 稳定符号链接，再把链接作为
 `CH341_DEVICE_PATH`。如果 FNOS 不便配置 udev，可在设备变化后更新 `.env` 并重建
-容器。
+容器。恢复步骤是：重新运行 `lsusb`，找到新的 Bus/Device；更新
+`CH341_DEVICE_PATH` 和 `CH341_DEVICE_GID`；然后执行：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d --force-recreate
+```
 
 另一种做法是把整个 `/dev/bus/usb` 绑定进容器并允许 USB major 189，但权限范围更大，
 不作为默认模板。确需使用时，可自行在 override 中增加：
@@ -351,6 +366,88 @@ services:
 4. 查看是否有宿主机驱动独占设备。
 5. 只在诊断期间临时以 root 运行容器；确认原因后恢复非 root。
 
+### 5. 五层实机验收（逐层停止）
+
+每层失败都停止，不要越级执行下一层。以下示例不会打印证书、challenge 或 signature
+正文，只输出非敏感元数据、长度和 SHA-256。
+
+1. **HTTP 层**：确认 API 进程可访问。`/healthz` 只验证 HTTP 服务，不验证硬件。
+
+   ```bash
+   curl -fsS http://127.0.0.1:8765/healthz
+   ```
+
+2. **USB/只读芯片层**：确认容器获得精确设备节点，然后执行只读探测。
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.usb.yml exec -T \
+     remote-mfi-server sh -c 'printf "{}\n" | /usr/local/bin/mfi-backend probe'
+   ```
+
+   只接受 `usbId=1a86:5512`、`i2cAddress=17`（即 `0x11`）、合理的
+   `protocolMajor` 和非零 `certificateLength`。这一步不读取并打印证书正文。
+
+3. **证书层**：先让当前 shell 安全加载 `.env`，调用 API 后仅打印证书长度与服务计算的
+   摘要。不要在终端直接输出完整 JSON 响应。
+
+   ```bash
+   set -a; . ./.env; set +a
+   python3 - <<'PY'
+   import base64, json, os, urllib.request
+
+   request = urllib.request.Request(
+       "http://127.0.0.1:8765/mfi/certificate",
+       headers={"Authorization": "Bearer " + os.environ["MFI_BEARER_TOKEN"]},
+   )
+   with urllib.request.urlopen(request, timeout=15) as response:
+       body = json.load(response)
+   result = {
+       "type": body["type"],
+       "protocolMajor": body["protocolMajor"],
+       "certificateLength": len(base64.b64decode(body["certificate"], validate=True)),
+       "certificateSha256": body["certificateSha256"],
+   }
+   print(json.dumps(result, ensure_ascii=False))
+   PY
+   ```
+
+4. **真实签名层（会向芯片发起写操作）**：只有前三层通过后再执行。脚本生成一次性随机
+   challenge，并且仅输出 `signatureLength` 与 `signatureSha256`。它证明芯片返回了结果，
+   但不等于 iPhone 已认证成功。
+
+   ```bash
+   python3 - <<'PY'
+   import base64, hashlib, json, os, secrets, urllib.request, uuid
+
+   payload = json.dumps({
+       "challenge": base64.b64encode(secrets.token_bytes(32)).decode("ascii"),
+       "requestId": str(uuid.uuid4()),
+   }).encode("utf-8")
+   request = urllib.request.Request(
+       "http://127.0.0.1:8765/mfi/sign",
+       data=payload,
+       headers={
+           "Authorization": "Bearer " + os.environ["MFI_BEARER_TOKEN"],
+           "Content-Type": "application/json",
+       },
+       method="POST",
+   )
+   with urllib.request.urlopen(request, timeout=15) as response:
+       signature = base64.b64decode(json.load(response)["signature"], validate=True)
+   print(json.dumps({
+       "signatureLength": len(signature),
+       "signatureSha256": hashlib.sha256(signature).hexdigest(),
+   }))
+   PY
+   ```
+
+5. **xcertplay/iPhone 端到端层**：在 xcertplay 配置该 URL 和 Token，发起真实连接。只有
+   iPhone/xcertplay 日志出现 `AA05 AuthenticationSucceeded` 才能声明端到端成功；前四层
+   均不能代替此结果。
+
+`reset` 仅关闭并重新打开 USB 会话、确认地址 `0x11` 仍可读取。为避免芯片重新锁存到
+`0x10`，内置后端不会脉冲物理 RST，也不会声称完成了物理芯片复位。
+
 ## 五、环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -358,7 +455,7 @@ services:
 | `REMOTE_MFI_PORT` | `8765` | NAS 对外端口 |
 | `MFI_AUTH_REQUIRED` | `true` | 是否要求 Bearer Token |
 | `MFI_BEARER_TOKEN` | 无 | 必填的长随机 Token；未配置时业务接口返回 503 |
-| `MFI_BACKEND_COMMAND` | 无 | 真实硬件后端命令，不通过 shell 执行 |
+| `MFI_BACKEND_COMMAND` | `/usr/local/bin/mfi-backend` | 内置真实硬件后端；不通过 shell 执行 |
 | `MFI_BACKEND_TIMEOUT_SECONDS` | `8` | 单次硬件命令超时，范围 0–120 秒 |
 | `MFI_CERTIFICATE_FILE` | 无 | 可选原始证书文件，和 Base64 二选一 |
 | `MFI_CERTIFICATE_BASE64` | 无 | 可选标准 Base64 证书，长内容更建议文件 |
@@ -370,6 +467,10 @@ services:
 | `LOG_LEVEL` | `INFO` | `DEBUG/INFO/WARNING/ERROR/CRITICAL` |
 | `CH341_DEVICE_PATH` | 无 | USB override 使用的真实宿主机设备节点 |
 | `CH341_DEVICE_GID` | 无 | USB 节点的数字 GID |
+| `CH341_USB_VID` | `0x1a86` | 内置后端匹配的 USB vendor ID |
+| `CH341_USB_PID` | `0x5512` | 内置后端匹配的 USB product ID |
+| `MFI_I2C_ADDRESS` | `0x11` | MFi 业务地址；本板不要自动退到 `0x10` |
+| `CH341_I2C_SPEED_KHZ` | `100` | I²C 速度；允许 `20/100/400/750` |
 
 服务固定使用一个 Uvicorn worker。幂等缓存位于进程内存，容器重启后会清空；不要擅自
 增加多 worker，否则每个 worker 会拥有独立缓存并可能重复访问芯片。
@@ -432,11 +533,12 @@ SHA-256 由服务根据证书字节计算，避免配置值与证书不一致。
 
 ```json
 {
-  "detail": ""
+  "detail": "USB session reopened; physical MFi RST was not pulsed to preserve I2C address 0x11"
 }
 ```
 
-reset 不做假成功：真实后端复位失败时返回 5xx，并保留现有幂等缓存。
+reset 不做假成功：内置后端重新打开 USB 会话并执行只读探测；失败时返回 5xx，并保留
+现有幂等缓存。它不会脉冲物理 RST。
 
 ## 七、xcertplay 中配置
 
@@ -466,7 +568,7 @@ signature、证书正文或请求体。
 
 | 现象 | 常见原因 |
 |---|---|
-| `/healthz` 200，但 sign 503 | 未配置/无法启动真实 `MFI_BACKEND_COMMAND` |
+| `/healthz` 200，但 sign 503 | USB 未映射、内置后端不可启动，或显式后端路径错误 |
 | certificate 503 | 没有静态证书，且硬件后端不可用 |
 | certificate 502 | 后端返回非法 JSON/Base64/类型/版本/长度 |
 | sign 422 | challenge 不是标准 Base64，或解码长度不在 1–128 |
@@ -475,6 +577,22 @@ signature、证书正文或请求体。
 | 401 | xcertplay Token 缺失或不匹配 |
 | 容器 unhealthy | HTTP 进程不可访问；查看 Docker 日志 |
 | USB Permission denied | 节点/GID 已变化、映射错误或宿主机权限限制 |
+
+### 固定版本回滚
+
+如果新版本的 HTTP、probe、证书或签名任一层失败，保留现有 `.env` 和 Token，只将镜像
+恢复为稳定版本并重建当前服务：
+
+```bash
+sed -i 's#^REMOTE_MFI_IMAGE=.*#REMOTE_MFI_IMAGE=hanfu1997/remote-mfi-server:1.0.0#' .env
+docker compose -f docker-compose.yml -f docker-compose.usb.yml pull
+docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d --force-recreate
+curl -fsS http://127.0.0.1:8765/healthz
+```
+
+不要删除旧镜像、旧 Compose、`.env`、Bearer Token 或用户数据。`1.0.0` 只提供原 API
+框架，不包含本次内置硬件辅助程序，因此回滚后 `/healthz` 可恢复，但硬件签名能力也会
+回到旧版本状态。
 
 ## 九、本地测试
 
