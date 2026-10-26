@@ -181,11 +181,15 @@ jobs:
           COMMIT: ${{ github.sha }}
         run: |
           image="hanfu1997/remote-mfi-server@$DIGEST"
+          manifest=$(docker buildx imagetools inspect --raw "$image")
           for platform in linux/amd64 linux/arm64; do
-            result=$(docker run --rm --platform "$platform" "$image" /usr/local/bin/mfi-backend --version)
+            arch="${platform#linux/}"
+            child=$(printf '%s' "$manifest" | jq -er --arg arch "$arch" '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest] | if length == 1 then .[0] else error("expected one architecture manifest") end')
+            arch_image="hanfu1997/remote-mfi-server@$child"
+            result=$(docker run --rm --platform "$platform" "$arch_image" /usr/local/bin/mfi-backend --version)
             printf '%s: %s\n' "$platform" "$result"
             case "$result" in *"version=$VERSION commit=$COMMIT "*) ;; *) exit 1 ;; esac
-            docker run --rm --platform "$platform" --entrypoint sh "$image" -c 'ldd /usr/local/bin/mfi-backend > /tmp/links && ! grep -q "not found" /tmp/links && test "$(id -u)" = 10001 && test -f /usr/share/doc/remote-mfi/licenses/go-LICENSE && test -f /usr/share/doc/remote-mfi/hardware-backend/vendor/github.com/google/gousb/LICENSE'
+            docker run --rm --platform "$platform" --entrypoint sh "$arch_image" -c 'ldd /usr/local/bin/mfi-backend > /tmp/links && ! grep -q "not found" /tmp/links && test "$(id -u)" = 10001 && test -f /usr/share/doc/remote-mfi/licenses/go-LICENSE && test -f /usr/share/doc/remote-mfi/hardware-backend/vendor/github.com/google/gousb/LICENSE'
           done
 
       - name: Promote verified candidate

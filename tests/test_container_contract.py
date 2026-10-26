@@ -125,6 +125,8 @@ def test_release_promotes_only_the_smoke_tested_candidate_digest() -> None:
     promote = next(i for i, step in enumerate(steps) if step.get("name") == "Promote verified candidate")
     assert candidate < smoke < promote
     assert "steps.candidate.outputs.digest" in str(steps[smoke])
+    assert "imagetools inspect --raw" in str(steps[smoke])
+    assert 'architecture == $arch' in str(steps[smoke])
     assert "steps.candidate.outputs.digest" in str(steps[promote])
     assert "imagetools create" in str(steps[promote])
 
