@@ -1,0 +1,10 @@
+.env
+.pytest_cache/
+.venv*/
+__pycache__/
+*.py[cod]
+*.zip
+backend/*
+!backend/README.md
+secrets/*
+!secrets/README.md

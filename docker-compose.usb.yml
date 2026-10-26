@@ -1,0 +1,6 @@
+services:
+  remote-mfi-server:
+    devices:
+      - "${CH341_DEVICE_PATH:?请在 .env 设置实际 CH341_DEVICE_PATH}:${CH341_DEVICE_PATH:?请在 .env 设置实际 CH341_DEVICE_PATH}:rwm"
+    group_add:
+      - "${CH341_DEVICE_GID:?请在 .env 设置设备节点的数字 GID}"
