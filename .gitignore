@@ -4,6 +4,9 @@
 __pycache__/
 *.py[cod]
 *.zip
+.superpowers/
+hardware-backend/mfi-backend
+hardware-backend/coverage.out
 backend/*
 !backend/README.md
 secrets/*
